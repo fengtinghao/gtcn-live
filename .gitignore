@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.dylib
+*.so
+*.pt
+*.wav
+.pytest_cache/
+models/
