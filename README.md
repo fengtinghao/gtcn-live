@@ -33,17 +33,20 @@ Linux needs `cc` + OpenBLAS (`libopenblas-dev`); Windows is not supported.
 
 ## Use
 
-You need a gTCN training checkpoint and an effect embedding computed with it
-(e.g. `best_BritPlexi.pt` + `BritPlexi_embeddings.pt` from the gTCN repo's `checkpoints/`).
-Model files are not stored in this repo.
+Effect embeddings are included in [`embeddings/`](./embeddings/). The full gTCN training
+checkpoints are not included; download the matching checkpoint from the
+[gTCN repo](https://github.com/fengtinghao/gTCN) before running an effect:
 
 ```bash
 python -m gtcn_live devices
 python -m gtcn_live run \
     --checkpoint ../gTCN/checkpoints/best_BritPlexi.pt \
-    --embedding  ../gTCN/checkpoints/BritPlexi_embeddings.pt \
+    --embedding embeddings/BritPlexi_embeddings.pt \
     --input-device "Scarlett 2i2" --input-channel 0 --block 128
 ```
+
+Included embeddings: `BritPlexi`, `FenderDeluxe`, `FenderDouble`, `Alpaca_Rogue`,
+and `minosaur`. Use each with its corresponding gTCN checkpoint.
 
 **Use headphones** (or you will get feedback). Type commands in the terminal while playing:
 `wet 0.8`, `in 6` (input gain dB), `out -3`, `bypass`, `q`.
