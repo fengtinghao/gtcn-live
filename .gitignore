@@ -1,4 +1,6 @@
 __pycache__/
+.venv/
+gtcnlive/
 *.pyc
 *.dylib
 *.so
@@ -6,4 +8,5 @@ __pycache__/
 *.wav
 .pytest_cache/
 models/
-!embeddings/*.pt
+!embeddings/*_embeddings.pt
+checkpoints/

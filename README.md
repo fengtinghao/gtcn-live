@@ -26,27 +26,76 @@ Measured on an Apple M1 Ultra, single thread: **1.5 ms per 128-sample block (2.9
 ## Install
 
 ```bash
-pip install -r requirements.txt     # needs clang (Xcode CLT) on macOS; the kernel auto-builds on first run
+python3.13 -m venv gtcnlive
+source gtcnlive/bin/activate
+python -m pip install -r requirements.txt     # needs clang (Xcode CLT) on macOS; the kernel auto-builds on first run
 ```
 
 Linux needs `cc` + OpenBLAS (`libopenblas-dev`); Windows is not supported.
 
-## Use
+## Folders
 
-Effect embeddings are included in [`embeddings/`](./embeddings/). The full gTCN training
-checkpoints are not included; download the matching checkpoint from the
-[gTCN repo](https://github.com/fengtinghao/gTCN) before running an effect:
+- `checkpoints/` — gTCN checkpoints (`last.pt`, `best_*.pt`); not tracked by Git (36 MB each)
+- `embeddings/` — effect embeddings (`<Effect>_embeddings.pt`); small, tracked by Git
+
+An embedding only works with the checkpoint it was created with. The five shipped embeddings
+(`BritPlexi`, `FenderDeluxe`, `FenderDouble`, `Alpaca_Rogue`, `minosaur`) pair with the
+matching `checkpoints/best_<Effect>.pt`. Embeddings you create yourself should use `checkpoints/last.pt`.
+
+## Workflow
+
+**1. Find your audio interface**
 
 ```bash
-python -m gtcn_live devices
-python -m gtcn_live run \
-    --checkpoint ../gTCN/checkpoints/best_BritPlexi.pt \
-    --embedding embeddings/BritPlexi_embeddings.pt \
-    --input-device "Scarlett 2i2" --input-channel 0 --block 128
+python -m gtcn_live devices          # note the device ID, e.g. 6 for "Balance"
 ```
 
-Included embeddings: `BritPlexi`, `FenderDeluxe`, `FenderDouble`, `Alpaca_Rogue`,
-and `minosaur`. Use each with its corresponding gTCN checkpoint.
+**2. Create an effect embedding by playing along with a wet recording**
+
+The app plays a wet guitar recording (the sound of the effect) while it records your dry guitar
+from the interface. When enough audio has been captured it creates and saves the embedding, then
+tells you to stop playing.
+
+```bash
+python -m gtcn_live capture \
+    --checkpoint checkpoints/last.pt \
+    --gtcn-source ../gTCN/src \
+    --wet-file references/wet.wav \
+    --output embeddings/MyEffect_embeddings.pt --name MyEffect \
+    --input-device 6 --output-device 6 --input-channel 1
+```
+
+Tips for a good embedding:
+- Use **headphones**, and play the **same part** as the wet recording (same notes and rhythm).
+  Being slightly off in time barely matters; playing different notes degrades the result.
+- Use a wet WAV at the checkpoint's sample rate (44.1 kHz) with at least 2 s of audio. It captures the
+  first `--seconds` (default 30), and longer, varied playing gives a more robust embedding.
+- Keep the dry level healthy (peaks around -12 to -6 dBFS). Watch the `dry level` readout while playing;
+  adjust with `--in-gain` or the interface gain. A silent input is rejected.
+- Dropouts (`xruns`) hurt alignment; if you see them, capture again with `--block 256`.
+
+If you already have a matching dry/wet pair of WAVs (same performance, sample-aligned, same length):
+
+```bash
+python -m gtcn_live embed --checkpoint checkpoints/last.pt --gtcn-source ../gTCN/src \
+    --dry references/dry.wav --wet references/wet.wav --output embeddings/MyEffect_embeddings.pt --name MyEffect
+```
+
+**3. Play guitar through the effect in real time**
+
+```bash
+python -m gtcn_live run \
+    --checkpoint checkpoints/last.pt \
+    --embedding embeddings/MyEffect_embeddings.pt \
+    --input-device 6 --output-device 6 --input-channel 1 --block 128
+```
+
+Or one of the shipped effects:
+
+```bash
+python -m gtcn_live run --checkpoint checkpoints/best_BritPlexi.pt \
+    --embedding embeddings/BritPlexi_embeddings.pt --input-device 6 --output-device 6 --input-channel 1
+```
 
 **Use headphones** (or you will get feedback). Type commands in the terminal while playing:
 `wet 0.8`, `in 6` (input gain dB), `out -3`, `bypass`, `q`.
@@ -74,3 +123,4 @@ python -m pytest tests
 - `gtcn_live/native.py`, `csrc/gtcn_rt.c` — real-time engine (used by the app)
 - `gtcn_live/engine.py` — pure-PyTorch streaming engine (reference / fallback, too slow for live use)
 - `gtcn_live/app.py` — audio loop, CLI
+- `gtcn_live/capture.py`, `gtcn_live/embedding.py` — play-along capture and embedding creation

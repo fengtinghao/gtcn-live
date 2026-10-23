@@ -7,6 +7,7 @@ import argparse
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import soundfile as sf
@@ -158,6 +159,91 @@ def cmd_bench(args):
           f"max {times[-1]:.2f} ms, budget {budget:.2f} ms ({times[250] / budget * 100:.0f}% load)")
 
 
+def cmd_embed(args):
+    from .embedding import create_embedding
+
+    try:
+        name, stats = create_embedding(
+            args.checkpoint, args.gtcn_source, args.dry, args.wet, args.output, args.name
+        )
+    except ValueError as exc:
+        sys.exit(str(exc))
+    print(f"Created {name} embedding from {stats['num_inliers']}/{stats['num_references']} "
+          f"reference windows: {args.output}")
+
+
+def cmd_capture(args):
+    import sounddevice as sd
+
+    from .capture import ReferenceCapture
+    from .embedding import load_model, save_embedding
+
+    try:
+        model, config, checkpoint_path = load_model(args.checkpoint, args.gtcn_source)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    sr = config["data"]["sample_rate"]
+    need = config["data"].get("reference_seconds", 2.0)
+
+    wet, wet_sr = sf.read(args.wet_file, dtype="float32", always_2d=True)
+    if wet_sr != sr:
+        sys.exit(f"{args.wet_file} is {wet_sr} Hz but the model needs {sr} Hz; resample first")
+    wet = wet.mean(axis=1)[: int(args.seconds * sr)]
+    if len(wet) < need * sr:
+        sys.exit(f"need at least {need:g} s of wet audio, got {len(wet) / sr:.1f} s")
+
+    in_dev = args.input_device if args.input_device is not None else sd.default.device[0]
+    out_dev = args.output_device if args.output_device is not None else sd.default.device[1]
+    in_info, out_info = sd.query_devices(in_dev, "input"), sd.query_devices(out_dev, "output")
+    n_in = max(in_info["max_input_channels"], 1)
+    n_out = max(min(out_info["max_output_channels"], 2), 1)
+    if args.input_channel >= n_in:
+        sys.exit(f"input device has only {n_in} channel(s); --input-channel is 0-based")
+
+    cap = None
+    in_gain = 10 ** (args.in_gain / 20)
+
+    def callback(indata, outdata, frames, time_info, status):
+        if status:
+            cap.xruns += 1
+        cap.process(indata[:, args.input_channel] * in_gain, outdata[:, 0])
+        outdata[:, 1:] = outdata[:, :1]
+        if cap.done:
+            raise sd.CallbackStop
+
+    stream = sd.Stream(samplerate=sr, blocksize=args.block, device=(in_dev, out_dev),
+                       channels=(n_in, n_out), dtype="float32", latency=args.latency,
+                       callback=callback)
+    with stream:
+        lat = stream.latency
+        cap = ReferenceCapture(wet, round((lat[0] + lat[1]) * sr))
+        print(f"input : [{in_dev}] {in_info['name']} (channel {args.input_channel})")
+        print(f"output: [{out_dev}] {out_info['name']}   round-trip latency "
+              f"{(lat[0] + lat[1]) * 1000:.1f} ms")
+        print(f"Capturing {len(wet) / sr:.0f} s. Use headphones. Play your dry guitar along with the "
+              "wet recording, as tightly as you can, and keep playing until told to stop.")
+        stream.start()
+        while stream.active:
+            time.sleep(0.25)
+            print(f"\r{cap.pos / sr:5.1f} / {len(wet) / sr:.0f} s   dry level "
+                  f"{to_db(cap.peak):6.1f} dBFS   xruns {cap.xruns}   ", end="", flush=True)
+    print()
+
+    dry, wet = cap.aligned()
+    if float(np.abs(dry).max()) < 1e-3:
+        sys.exit("The recorded dry signal is silent. Check --input-device / --input-channel and the "
+                 "input gain, then capture again.")
+    if cap.xruns:
+        print(f"warning: {cap.xruns} audio dropouts during capture; try --block 256 and capture again "
+              "if the result sounds off.")
+    name, stats = save_embedding(
+        model, config, checkpoint_path, dry, wet, args.output, args.name,
+        {"wet_reference": Path(args.wet_file).name, "source": "live capture"})
+    print("\a\nDone - you can STOP playing now.")
+    print(f"Saved {name} embedding ({stats['num_inliers']}/{stats['num_references']} windows) to {args.output}")
+    print(f"Play with it: python -m gtcn_live run --checkpoint {args.checkpoint} --embedding {args.output} ...")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="gtcn_live", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -190,6 +276,30 @@ def build_parser():
     sp = sub.add_parser("bench", help="measure per-block compute time")
     common(sp)
     sp.set_defaults(fn=cmd_bench)
+
+    sp = sub.add_parser("embed", help="create an effect embedding from paired dry/wet WAVs")
+    sp.add_argument("--checkpoint", required=True, help="gTCN training checkpoint")
+    sp.add_argument("--gtcn-source", required=True, help="path to gTCN/src containing model.py")
+    sp.add_argument("--dry", required=True, help="dry reference WAV")
+    sp.add_argument("--wet", required=True, help="matching wet reference WAV")
+    sp.add_argument("--output", required=True, help="path for the generated embedding file")
+    sp.add_argument("--name", help="display name for the effect (defaults to output filename)")
+    sp.set_defaults(fn=cmd_embed)
+
+    sp = sub.add_parser("capture", help="play a wet WAV while recording your dry playing, then create an embedding")
+    sp.add_argument("--checkpoint", required=True, help="gTCN training checkpoint (use it again for 'run')")
+    sp.add_argument("--gtcn-source", required=True, help="path to gTCN/src containing model.py")
+    sp.add_argument("--wet-file", required=True, help="wet guitar recording to play along with")
+    sp.add_argument("--output", required=True, help="path for the generated embedding file")
+    sp.add_argument("--name", help="display name for the effect (defaults to output filename)")
+    sp.add_argument("--seconds", type=float, default=30.0, help="how much of the wet file to capture")
+    sp.add_argument("--input-device", type=lambda s: int(s) if s.isdigit() else s)
+    sp.add_argument("--output-device", type=lambda s: int(s) if s.isdigit() else s)
+    sp.add_argument("--input-channel", type=int, default=0, help="0-based channel of the guitar input")
+    sp.add_argument("--in-gain", type=float, default=0.0, help="input gain in dB")
+    sp.add_argument("--block", type=int, default=128)
+    sp.add_argument("--latency", default="low", help="'low', 'high' or seconds")
+    sp.set_defaults(fn=cmd_capture)
     return p
 
 
