@@ -299,7 +299,7 @@ def build_parser():
     sp.add_argument("--wet-file", required=True, help="wet guitar recording to play along with")
     sp.add_argument("--output", required=True, help="path for the generated embedding file")
     sp.add_argument("--name", help="display name for the effect (defaults to output filename)")
-    sp.add_argument("--seconds", type=float, default=30.0, help="total capture length; the wet file loops if it is shorter")
+    sp.add_argument("--seconds", type=float, default=60.0, help="total capture length; the wet file loops if it is shorter")
     sp.add_argument("--input-device", type=lambda s: int(s) if s.isdigit() else s)
     sp.add_argument("--output-device", type=lambda s: int(s) if s.isdigit() else s)
     sp.add_argument("--input-channel", type=int, default=0, help="0-based channel of the guitar input")
