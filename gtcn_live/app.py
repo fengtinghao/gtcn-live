@@ -188,9 +188,16 @@ def cmd_capture(args):
     wet, wet_sr = sf.read(args.wet_file, dtype="float32", always_2d=True)
     if wet_sr != sr:
         sys.exit(f"{args.wet_file} is {wet_sr} Hz but the model needs {sr} Hz; resample first")
-    wet = wet.mean(axis=1)[: int(args.seconds * sr)]
-    if len(wet) < need * sr:
-        sys.exit(f"need at least {need:g} s of wet audio, got {len(wet) / sr:.1f} s")
+    wet = wet.mean(axis=1)
+    if len(wet) == 0:
+        sys.exit(f"{args.wet_file} is empty")
+    total = int(args.seconds * sr)
+    if total < need * sr:
+        sys.exit(f"--seconds must be at least {need:g}")
+    loops = -(-total // len(wet))
+    if loops > 1:
+        print(f"{args.wet_file} is {len(wet) / sr:.1f} s; it will loop to fill {args.seconds:g} s.")
+    wet = np.tile(wet, loops)[:total]
 
     in_dev = args.input_device if args.input_device is not None else sd.default.device[0]
     out_dev = args.output_device if args.output_device is not None else sd.default.device[1]
@@ -292,7 +299,7 @@ def build_parser():
     sp.add_argument("--wet-file", required=True, help="wet guitar recording to play along with")
     sp.add_argument("--output", required=True, help="path for the generated embedding file")
     sp.add_argument("--name", help="display name for the effect (defaults to output filename)")
-    sp.add_argument("--seconds", type=float, default=30.0, help="how much of the wet file to capture")
+    sp.add_argument("--seconds", type=float, default=30.0, help="total capture length; the wet file loops if it is shorter")
     sp.add_argument("--input-device", type=lambda s: int(s) if s.isdigit() else s)
     sp.add_argument("--output-device", type=lambda s: int(s) if s.isdigit() else s)
     sp.add_argument("--input-channel", type=int, default=0, help="0-based channel of the guitar input")

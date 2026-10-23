@@ -68,8 +68,9 @@ python -m gtcn_live capture \
 Tips for a good embedding:
 - Use **headphones**, and play the **same part** as the wet recording (same notes and rhythm).
   Being slightly off in time barely matters; playing different notes degrades the result.
-- Use a wet WAV at the checkpoint's sample rate (44.1 kHz) with at least 2 s of audio. It captures the
-  first `--seconds` (default 30), and longer, varied playing gives a more robust embedding.
+- Use a wet WAV at the checkpoint's sample rate (44.1 kHz). The capture lasts `--seconds` (default 30,
+  minimum 2); if the wet file is shorter it **loops**, so play the same part again each time round.
+  Longer, varied playing gives a more robust embedding.
 - Keep the dry level healthy (peaks around -12 to -6 dBFS). Watch the `dry level` readout while playing;
   adjust with `--in-gain` or the interface gain. A silent input is rejected.
 - Dropouts (`xruns`) hurt alignment; if you see them, capture again with `--block 256`.
