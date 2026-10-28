@@ -8,5 +8,5 @@ gtcnlive/
 *.wav
 .pytest_cache/
 models/
-!embeddings/*_embeddings.pt
-checkpoints/
+embeddings/
+references/
